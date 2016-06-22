@@ -30,7 +30,7 @@ export TEMPFILE FILE GET64 GET32 debug
 preReqs() {
   #make sure required binaries exist
   if [ $debug -gt 1 ]; then echo "DEBUG: preReqs";fi
-    for file in /bin/awk /bin/egrep /bin/grep /bin/rpm /bin/sed /bin/sort /usr/bin/createrepo /usr/bin/curl /usr/bin/reposync /usr/bin/wc /usr/bin/wget; do
+    for file in /bin/awk /bin/egrep /bin/grep /bin/rpm /bin/sed /bin/sort /usr/bin/createrepo /usr/bin/reposync /usr/bin/wc /usr/bin/wget; do
     if [ ! -f ${file} ]; then 
       /bin/echo " ${file} not found. Cannot continue"; exit 1; 
     else 
@@ -62,7 +62,7 @@ checkDirs() {
 checkDirs
 getDirList(){
   if [ $debug -gt 1 ]; then echo "DEBUG: getDirList";fi
-  /usr/bin/curl --silent http://packages.vmware.com/tools/esx/index.html >${DIRLIST}
+  /usr/bin/wget -O - --quiet http://packages.vmware.com/tools/esx/index.html >${DIRLIST}
   if [ $? -eq 0 ]; then
     if [ $debug -gt 0 ]; then echo -n .;fi;
   else echo "collection of directories from packages.vmware.com/tools/esx/index.html failed. Fix!"; exit 1;
