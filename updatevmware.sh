@@ -24,6 +24,8 @@ VERLIST=/tmp/vmwarevers`date +%m%d%y-%H`
 MIRRORSERVERS=("server1.mydomain.com" "server2.mydomain.com")
 export TOPDIR
 export UPDATEREPO
+# Allow overriding the above variables from a configuration file for local customization
+[ -e "$0.cfg" ] && . "$0.cfg"
 debug=0;
 if [ -n "${1:+1}" ]; then debug=$1; else debug=0; fi
 export TEMPFILE FILE GET64 GET32 debug
@@ -41,23 +43,16 @@ preReqs() {
 }
 preReqs
 checkDirs() {
-  #make sure the directories we expect to be in place are
-  if [ $debug -gt 1 ]; then echo "DEBUG: checkDirs";fi
-  for osmajor in 5 6; do 
-    for arch in i386 i686 x86_64; do 
-      for dir in  ${TOPDIR}/${osmajor}/${arch}/ ; do
-        if [ ! -d ${dir} ]; then 
-          /bin/echo;/bin/echo " ${dir} doesn't exist. creating"; mkdir -p ${dir}; 
-          if [ $? -ne 0 ]; then 
-            echo "Couldn't create. exiting!"; exit 1; 
-          fi 
-        else
-          if [ $debug -gt 0 ]; then /bin/echo -n ".";fi;
-        fi
-      done
-    done
-  done
   if [ $debug -gt 1 ]; then echo ;fi
+  if [ ! -d ${TOPDIR}/keys ]; then
+    mkdir -p ${TOPDIR}/keys
+  fi
+  for KEY in VMWARE-PACKAGING-GPG-DSA-KEY.pub VMWARE-PACKAGING-GPG-RSA-KEY.pub
+  do
+    if [ ! -f ${TOPDIR}/keys/${KEY} ]; then
+      /usr/bin/wget --quiet -O ${TOPDIR}/keys/${KEY} http://packages.vmware.com/tools/keys/${KEY}
+    fi
+  done
 }
 checkDirs
 getDirList(){
@@ -105,6 +100,7 @@ checkArch(){
       #we should try to parse what versions have repos for this arch
       if [ $debug -gt 2 ]; then echo "DEBUG: checkArch $1 $2 true true" ;fi
       for VERSION in `/bin/cat $VERLIST`; do
+      #for VERSION in latest; do
         #check to see if the file exists
         if [ $debug -gt 2 ]; then 
           echo "wget -O/dev/null -q  http://packages.vmware.com/tools/esx/${VERSION}/${MAJOR}/${ARCH}/index.html"
@@ -138,28 +134,25 @@ addRepo() {
   if [ -z $2 ]; then echo "addRepo: Did not get the arch I should check for. cannot continue";exit 1;fi
   if [ -z $3 ]; then echo "addRepo: Did not get the vmware version. cannot continue";exit 1;fi
   if [ $1 == "rhel5" ]; then
-    REPODIR="/repo/vendor/vmware/5/$2/"
-    REPOFILE="/repo/vendor/vmware/5/$2/vmware.reposcratch"
+    RELEASE=5
   else
-    REPODIR="/repo/vendor/vmware/6/$2/"
-    REPOFILE="/repo/vendor/vmware/6/$2/vmware.reposcratch"
+    RELEASE=6
   fi
-  if [ $debug -gt 3 ]; then echo "DEBUG: addRepo: Creating repo file $3_$2";fi
-  echo "[$3]" >$REPOFILE
-  echo "name=$3" >>$REPOFILE
-  echo "enabled=1" >>$REPOFILE
-  echo "gpgcheck=1" >>$REPOFILE
+  REPODIR="$TOPDIR/esx/$3/$RELEASE"
+  REPOFILE="$TOPDIR/vmware.reposcratch"
+  if [ $debug -gt 3 ]; then echo "DEBUG: addRepo: Creating repo file $3_${RELEASE}_$2";fi
+  echo "[$2]" >$REPOFILE
+  echo "name=$3_${RELEASE}_$2" >>$REPOFILE
   echo "baseurl=http://packages.vmware.com/tools/esx/${3}/${1}/${2}" >>$REPOFILE
-  echo "gpgkey=http://packages.vmware.com/tools/keys/VMWARE-PACKAGING-GPG-DSA-KEY.pub" >>$REPOFILE
-  echo "" >>$REPOFILE
-  cd $REPODIR
+  rm -rf /var/cache/yum/$2/
   if [ $debug -gt 1 ]; then
-    /usr/bin/reposync -n  -a $2 -c ${REPOFILE} -r $3
+    /usr/bin/reposync    -n -c ${REPOFILE} -r $2 -p $REPODIR
   else
-    /usr/bin/reposync -q  -n -a $2 -c ${REPOFILE} -r $3
+    /usr/bin/reposync -q -n -c ${REPOFILE} -r $2 -p $REPODIR
   fi
   if [ $debug -gt 0 ]; then /bin/echo -n "." ;fi
   rm -f $REPOFILE
+  rm -rf /var/cache/yum/$2/
   if [ $debug -gt 0 ]; then /bin/echo -n "." ;fi
 }
 createMirrorFiles() {
@@ -168,18 +161,17 @@ createMirrorFiles() {
   if [ -z $2 ]; then echo "createMirrorFiles: Did not get the arch I should check for. cannot continue";exit 1;fi
   if [ -z $3 ]; then echo "createMirrorFiles: Did not get the vmware version. cannot continue";exit 1;fi
   if [ $1 == "rhel5" ]; then
-    MIRRORFILE="/repo/vendor/vmware/5/$2/$3/mirrorlist"
-    MIRRORDIR="/repo/vendor/vmware/5/$2/$3"
+    RELEASE=5
   else
-    MIRRORFILE="/repo/vendor/vmware/6/$2/$3/mirrorlist"
-    MIRRORDIR="/repo/vendor/vmware/6/$2/$3"
+    RELEASE=6
   fi
+  MIRRORDIR="$TOPDIR/esx/$3/$RELEASE/$2"
+  MIRRORFILE=$MIRRORDIR/mirrorlist
   if [ -d $MIRRORDIR ]; then
-    echo "#Mirror list for VMware $3 $1 ($3)" >$MIRRORFILE
+    echo "#Mirror list for VMwareTools $3 (el$RELEASE $2)" >$MIRRORFILE
     for SERVER in ${MIRRORSERVERS[@]}; do
-      echo "http://${SERVER}"'/vendor/vmware/$releasever/$basearch/'"$3" >>$MIRRORFILE
+      echo "http://${SERVER}/vendor/vmware/esx/$3/\$releasever/\$basearch/" >>$MIRRORFILE
     done
-    MIRRORFILE="/repo/vendor/vmware/6/$2/$3/mirrorlist"
     if [ $debug -gt 1 ]; then echo "DEBUG: createMirrorFiles: creating mirrorfile $MIRRORFILE"; 
     elif [ $debug -gt 0 ]; then /bin/echo -n "."
     fi
@@ -196,18 +188,19 @@ createRepo(){
   if [ -z $2 ]; then echo "createRepo: Did not get the arch I should check for. cannot continue";exit 1;fi
   if [ -z $3 ]; then echo "createRepo: Did not get the vmware version. cannot continue";exit 1;fi
   if [ $1 == "rhel5" ]; then
-    REPODIR="/repo/vendor/vmware/5/$2/$3"
+    RELEASE=5
   else
-    REPODIR="/repo/vendor/vmware/6/$2/$3"
+    RELEASE=6
   fi
+  REPODIR="$TOPDIR/esx/$3/$RELEASE/$2"
   if [ -d $REPODIR ]; then
     if [ $debug -gt 1 ]; then
-      cd $REPODIR; createrepo -s sha -v .
+      createrepo -s sha -v $REPODIR
     elif [ $debug -gt 0 ]; then
-      cd $REPODIR; createrepo -s sha .
+      createrepo -s sha    $REPODIR
       /bin/echo -n "."
     else
-      cd $REPODIR; createrepo -s sha .
+      createrepo -s sha -q $REPODIR
     fi
   fi
 }
